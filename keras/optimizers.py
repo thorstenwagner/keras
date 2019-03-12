@@ -1,4 +1,9 @@
+"""Built-in optimizer classes.
+"""
 from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import six
 import copy
 from six.moves import zip
@@ -13,6 +18,17 @@ if K.backend() == 'tensorflow':
 
 
 def clip_norm(g, c, n):
+    """Clip the gradient `g` if the L2 norm `n` exceeds `c`.
+
+    # Arguments
+        g: Tensor, the gradient tensor
+        c: float >= 0. Gradients will be clipped
+            when their L2 norm exceeds this value.
+        n: Tensor, actual norm of `g`.
+
+    # Returns
+        Tensor, the gradient clipped if required.
+    """
     if c <= 0:  # if clipnorm == 0 no need to add ops to the graph
         return g
 
@@ -71,6 +87,12 @@ class Optimizer(object):
 
     def get_gradients(self, loss, params):
         grads = K.gradients(loss, params)
+        if None in grads:
+            raise ValueError('An operation has `None` for gradient. '
+                             'Please make sure that all of your ops have a '
+                             'gradient defined (i.e. are differentiable). '
+                             'Common ops without gradient: '
+                             'K.argmax, K.round, K.eval.')
         if hasattr(self, 'clipnorm') and self.clipnorm > 0:
             norm = K.sqrt(sum([K.sum(K.square(g)) for g in grads]))
             grads = [clip_norm(g, self.clipnorm, norm) for g in grads]
@@ -95,6 +117,11 @@ class Optimizer(object):
             ValueError: in case of incompatible weight shapes.
         """
         params = self.weights
+        if len(params) != len(weights):
+            raise ValueError('Length of the specified weight list (' +
+                             str(len(weights)) +
+                             ') does not match the number of weights ' +
+                             'of the optimizer (' + str(len(params)) + ')')
         weight_value_tuples = []
         param_values = K.batch_get_value(params)
         for pv, p, w in zip(param_values, params, weights):
@@ -159,8 +186,8 @@ class SGD(Optimizer):
 
         lr = self.lr
         if self.initial_decay > 0:
-            lr *= (1. / (1. + self.decay * K.cast(self.iterations,
-                                                  K.dtype(self.decay))))
+            lr = lr * (1. / (1. + self.decay * K.cast(self.iterations,
+                                                      K.dtype(self.decay))))
         # momentum
         shapes = [K.int_shape(p) for p in params]
         moments = [K.zeros(shape) for shape in shapes]
@@ -207,7 +234,8 @@ class RMSprop(Optimizer):
         decay: float >= 0. Learning rate decay over each update.
 
     # References
-        - [rmsprop: Divide the gradient by a running average of its recent magnitude](http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf)
+        - [rmsprop: Divide the gradient by a running average of its recent magnitude
+           ](http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf)
     """
 
     def __init__(self, lr=0.001, rho=0.9, epsilon=None, decay=0.,
@@ -232,8 +260,8 @@ class RMSprop(Optimizer):
 
         lr = self.lr
         if self.initial_decay > 0:
-            lr *= (1. / (1. + self.decay * K.cast(self.iterations,
-                                                  K.dtype(self.decay))))
+            lr = lr * (1. / (1. + self.decay * K.cast(self.iterations,
+                                                      K.dtype(self.decay))))
 
         for p, g, a in zip(params, grads, accumulators):
             # update accumulator
@@ -260,16 +288,22 @@ class RMSprop(Optimizer):
 class Adagrad(Optimizer):
     """Adagrad optimizer.
 
+    Adagrad is an optimizer with parameter-specific learning rates,
+    which are adapted relative to how frequently a parameter gets
+    updated during training. The more updates a parameter receives,
+    the smaller the updates.
+
     It is recommended to leave the parameters of this optimizer
     at their default values.
 
     # Arguments
-        lr: float >= 0. Learning rate.
+        lr: float >= 0. Initial learning rate.
         epsilon: float >= 0. If `None`, defaults to `K.epsilon()`.
         decay: float >= 0. Learning rate decay over each update.
 
     # References
-        - [Adaptive Subgradient Methods for Online Learning and Stochastic Optimization](http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf)
+        - [Adaptive Subgradient Methods for Online Learning and Stochastic
+           Optimization](http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf)
     """
 
     def __init__(self, lr=0.01, epsilon=None, decay=0., **kwargs):
@@ -293,8 +327,8 @@ class Adagrad(Optimizer):
 
         lr = self.lr
         if self.initial_decay > 0:
-            lr *= (1. / (1. + self.decay * K.cast(self.iterations,
-                                                  K.dtype(self.decay))))
+            lr = lr * (1. / (1. + self.decay * K.cast(self.iterations,
+                                                      K.dtype(self.decay))))
 
         for p, g, a in zip(params, grads, accumulators):
             new_a = a + K.square(g)  # update accumulator
@@ -319,18 +353,28 @@ class Adagrad(Optimizer):
 class Adadelta(Optimizer):
     """Adadelta optimizer.
 
+    Adadelta is a more robust extension of Adagrad
+    that adapts learning rates based on a moving window of gradient updates,
+    instead of accumulating all past gradients. This way, Adadelta continues
+    learning even when many updates have been done. Compared to Adagrad, in the
+    original version of Adadelta you don't have to set an initial learning
+    rate. In this version, initial learning rate and decay factor can
+    be set, as in most other Keras optimizers.
+
     It is recommended to leave the parameters of this optimizer
     at their default values.
 
     # Arguments
-        lr: float >= 0. Learning rate.
+        lr: float >= 0. Initial learning rate, defaults to 1.
             It is recommended to leave it at the default value.
-        rho: float >= 0.
+        rho: float >= 0. Adadelta decay factor, corresponding to fraction of
+            gradient to keep at each time step.
         epsilon: float >= 0. Fuzz factor. If `None`, defaults to `K.epsilon()`.
-        decay: float >= 0. Learning rate decay over each update.
+        decay: float >= 0. Initial learning rate decay.
 
     # References
-        - [Adadelta - an adaptive learning rate method](http://arxiv.org/abs/1212.5701)
+        - [Adadelta - an adaptive learning rate method](
+           https://arxiv.org/abs/1212.5701)
     """
 
     def __init__(self, lr=1.0, rho=0.95, epsilon=None, decay=0.,
@@ -357,8 +401,8 @@ class Adadelta(Optimizer):
 
         lr = self.lr
         if self.initial_decay > 0:
-            lr *= (1. / (1. + self.decay * K.cast(self.iterations,
-                                                  K.dtype(self.decay))))
+            lr = lr * (1. / (1. + self.decay * K.cast(self.iterations,
+                                                      K.dtype(self.decay))))
 
         for p, g, a, d_a in zip(params, grads, accumulators, delta_accumulators):
             # update accumulator
@@ -400,13 +444,15 @@ class Adam(Optimizer):
         beta_2: float, 0 < beta < 1. Generally close to 1.
         epsilon: float >= 0. Fuzz factor. If `None`, defaults to `K.epsilon()`.
         decay: float >= 0. Learning rate decay over each update.
-        amsgrad: boolean. Weather to apply the AMSGrad variant of this
+        amsgrad: boolean. Whether to apply the AMSGrad variant of this
             algorithm from the paper "On the Convergence of Adam and
             Beyond".
 
     # References
-        - [Adam - A Method for Stochastic Optimization](http://arxiv.org/abs/1412.6980v8)
-        - [On the Convergence of Adam and Beyond](https://openreview.net/forum?id=ryQu7f-RZ)
+        - [Adam - A Method for Stochastic Optimization](
+           https://arxiv.org/abs/1412.6980v8)
+        - [On the Convergence of Adam and Beyond](
+           https://openreview.net/forum?id=ryQu7f-RZ)
     """
 
     def __init__(self, lr=0.001, beta_1=0.9, beta_2=0.999,
@@ -431,8 +477,8 @@ class Adam(Optimizer):
 
         lr = self.lr
         if self.initial_decay > 0:
-            lr *= (1. / (1. + self.decay * K.cast(self.iterations,
-                                                  K.dtype(self.decay))))
+            lr = lr * (1. / (1. + self.decay * K.cast(self.iterations,
+                                                      K.dtype(self.decay))))
 
         t = K.cast(self.iterations, K.floatx()) + 1
         lr_t = lr * (K.sqrt(1. - K.pow(self.beta_2, t)) /
@@ -491,7 +537,8 @@ class Adamax(Optimizer):
         decay: float >= 0. Learning rate decay over each update.
 
     # References
-        - [Adam - A Method for Stochastic Optimization](http://arxiv.org/abs/1412.6980v8)
+        - [Adam - A Method for Stochastic Optimization](
+           https://arxiv.org/abs/1412.6980v8)
     """
 
     def __init__(self, lr=0.002, beta_1=0.9, beta_2=0.999,
@@ -515,8 +562,8 @@ class Adamax(Optimizer):
 
         lr = self.lr
         if self.initial_decay > 0:
-            lr *= (1. / (1. + self.decay * K.cast(self.iterations,
-                                                  K.dtype(self.decay))))
+            lr = lr * (1. / (1. + self.decay * K.cast(self.iterations,
+                                                      K.dtype(self.decay))))
 
         t = K.cast(self.iterations, K.floatx()) + 1
         lr_t = lr / (1. - K.pow(self.beta_1, t))
@@ -572,7 +619,8 @@ class Nadam(Optimizer):
 
     # References
         - [Nadam report](http://cs229.stanford.edu/proj2015/054_report.pdf)
-        - [On the importance of initialization and momentum in deep learning](http://www.cs.toronto.edu/~fritz/absps/momentum.pdf)
+        - [On the importance of initialization and momentum in deep learning](
+           http://www.cs.toronto.edu/~fritz/absps/momentum.pdf)
     """
 
     def __init__(self, lr=0.002, beta_1=0.9, beta_2=0.999,
@@ -597,8 +645,10 @@ class Nadam(Optimizer):
         t = K.cast(self.iterations, K.floatx()) + 1
 
         # Due to the recommendations in [2], i.e. warming momentum schedule
-        momentum_cache_t = self.beta_1 * (1. - 0.5 * (K.pow(K.cast_to_floatx(0.96), t * self.schedule_decay)))
-        momentum_cache_t_1 = self.beta_1 * (1. - 0.5 * (K.pow(K.cast_to_floatx(0.96), (t + 1) * self.schedule_decay)))
+        momentum_cache_t = self.beta_1 * (1. - 0.5 * (
+            K.pow(K.cast_to_floatx(0.96), t * self.schedule_decay)))
+        momentum_cache_t_1 = self.beta_1 * (1. - 0.5 * (
+            K.pow(K.cast_to_floatx(0.96), (t + 1) * self.schedule_decay)))
         m_schedule_new = self.m_schedule * momentum_cache_t
         m_schedule_next = self.m_schedule * momentum_cache_t * momentum_cache_t_1
         self.updates.append((self.m_schedule, m_schedule_new))
@@ -616,7 +666,8 @@ class Nadam(Optimizer):
             m_t_prime = m_t / (1. - m_schedule_next)
             v_t = self.beta_2 * v + (1. - self.beta_2) * K.square(g)
             v_t_prime = v_t / (1. - K.pow(self.beta_2, t))
-            m_t_bar = (1. - momentum_cache_t) * g_prime + momentum_cache_t_1 * m_t_prime
+            m_t_bar = (1. - momentum_cache_t) * g_prime + (
+                momentum_cache_t_1 * m_t_prime)
 
             self.updates.append(K.update(m, m_t))
             self.updates.append(K.update(v, v_t))
@@ -746,5 +797,5 @@ def get(identifier):
     if isinstance(identifier, Optimizer):
         return identifier
     else:
-        raise ValueError('Could not interpret optimizer identifier:',
-                         identifier)
+        raise ValueError('Could not interpret optimizer identifier: ' +
+                         str(identifier))

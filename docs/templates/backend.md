@@ -45,6 +45,20 @@ KERAS_BACKEND=tensorflow python -c "from keras import backend"
 Using TensorFlow backend.
 ```
 
+In Keras it is possible to load more backends than `"tensorflow"`, `"theano"`, and `"cntk"`. Keras can use external backends as well, and this can be performed by changing the `keras.json` configuration file, and the `"backend"` setting. Suppose you have a Python module called `my_module` that you wanted to use as your external backend. The `keras.json` configuration file would be changed as follows:
+
+```
+{
+    "image_data_format": "channels_last",
+    "epsilon": 1e-07,
+    "floatx": "float32",
+    "backend": "my_package.my_module"
+}
+```
+An external backend must be validated in order to be used, a valid backend must have the following functions: `placeholder`, `variable` and `function`.
+
+If an external backend is not valid due to missing a required entry, an error will be logged notifying which entry/entries are missing.
+
 ----
 
 ## keras.json details
@@ -108,9 +122,9 @@ Most tensor operations you will need can be done as you would in TensorFlow or T
 
 ```python
 # Initializing Tensors with Random Numbers
-b = K.random_uniform_variable(shape=(3, 4)). # Uniform distribution
-c = K.random_normal_variable(shape=(3, 4)). # Gaussian distribution
-d = K.random_normal_variable(shape=(3, 4)).
+b = K.random_uniform_variable(shape=(3, 4), low=0, high=1) # Uniform distribution
+c = K.random_normal_variable(shape=(3, 4), mean=0, scale=1) # Gaussian distribution
+d = K.random_normal_variable(shape=(3, 4), mean=0, scale=1)
 
 # Tensor Arithmetic
 a = b + c * K.abs(d)

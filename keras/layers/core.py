@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+"""Core Keras layers.
+"""
 from __future__ import absolute_import
 from __future__ import division
+from __future__ import print_function
 
 import numpy as np
 
@@ -13,12 +16,13 @@ from .. import activations
 from .. import initializers
 from .. import regularizers
 from .. import constraints
-from ..engine import InputSpec
-from ..engine import Layer
+from ..engine.base_layer import InputSpec
+from ..engine.base_layer import Layer
 from ..utils.generic_utils import func_dump
 from ..utils.generic_utils import func_load
 from ..utils.generic_utils import deserialize_keras_object
 from ..utils.generic_utils import has_arg
+from ..utils import conv_utils
 from ..legacy import interfaces
 
 
@@ -56,7 +60,8 @@ class Masking(Layer):
         self.mask_value = mask_value
 
     def compute_mask(self, inputs, mask=None):
-        return K.any(K.not_equal(inputs, self.mask_value), axis=-1)
+        output_mask = K.any(K.not_equal(inputs, self.mask_value), axis=-1)
+        return output_mask
 
     def call(self, inputs):
         boolean_mask = K.any(K.not_equal(inputs, self.mask_value),
@@ -67,6 +72,9 @@ class Masking(Layer):
         config = {'mask_value': self.mask_value}
         base_config = super(Masking, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
 
 
 class Dropout(Layer):
@@ -87,7 +95,8 @@ class Dropout(Layer):
         seed: A Python integer to use as random seed.
 
     # References
-        - [Dropout: A Simple Way to Prevent Neural Networks from Overfitting](http://www.cs.toronto.edu/~rsalakhu/papers/srivastava14a.pdf)
+        - [Dropout: A Simple Way to Prevent Neural Networks from Overfitting](
+           http://www.jmlr.org/papers/volume15/srivastava14a/srivastava14a.pdf)
     """
     @interfaces.legacy_dropout_support
     def __init__(self, rate, noise_shape=None, seed=None, **kwargs):
@@ -124,6 +133,9 @@ class Dropout(Layer):
         base_config = super(Dropout, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
 
 class SpatialDropout1D(Dropout):
     """Spatial 1D version of Dropout.
@@ -147,7 +159,8 @@ class SpatialDropout1D(Dropout):
         Same as input
 
     # References
-        - [Efficient Object Localization Using Convolutional Networks](https://arxiv.org/abs/1411.4280)
+        - [Efficient Object Localization Using Convolutional Networks](
+           https://arxiv.org/abs/1411.4280)
     """
 
     @interfaces.legacy_spatialdropout1d_support
@@ -192,18 +205,14 @@ class SpatialDropout2D(Dropout):
         Same as input
 
     # References
-        - [Efficient Object Localization Using Convolutional Networks](https://arxiv.org/abs/1411.4280)
+        - [Efficient Object Localization Using Convolutional Networks](
+           https://arxiv.org/abs/1411.4280)
     """
 
     @interfaces.legacy_spatialdropoutNd_support
     def __init__(self, rate, data_format=None, **kwargs):
         super(SpatialDropout2D, self).__init__(rate, **kwargs)
-        if data_format is None:
-            data_format = K.image_data_format()
-        if data_format not in {'channels_last', 'channels_first'}:
-            raise ValueError('`data_format` must be in '
-                             '{`"channels_last"`, `"channels_first"`}')
-        self.data_format = data_format
+        self.data_format = K.normalize_data_format(data_format)
         self.input_spec = InputSpec(ndim=4)
 
     def _get_noise_shape(self, inputs):
@@ -245,18 +254,14 @@ class SpatialDropout3D(Dropout):
         Same as input
 
     # References
-        - [Efficient Object Localization Using Convolutional Networks](https://arxiv.org/abs/1411.4280)
+        - [Efficient Object Localization Using Convolutional Networks](
+           https://arxiv.org/abs/1411.4280)
     """
 
     @interfaces.legacy_spatialdropoutNd_support
     def __init__(self, rate, data_format=None, **kwargs):
         super(SpatialDropout3D, self).__init__(rate, **kwargs)
-        if data_format is None:
-            data_format = K.image_data_format()
-        if data_format not in {'channels_last', 'channels_first'}:
-            raise ValueError('`data_format` must be in '
-                             '{`"channels_last"`, `"channels_first"`}')
-        self.data_format = data_format
+        self.data_format = K.normalize_data_format(data_format)
         self.input_spec = InputSpec(ndim=5)
 
     def _get_noise_shape(self, inputs):
@@ -297,6 +302,9 @@ class Activation(Layer):
         config = {'activation': activations.serialize(self.activation)}
         base_config = super(Activation, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
 
 
 class Reshape(Layer):
@@ -453,13 +461,26 @@ class Permute(Layer):
 class Flatten(Layer):
     """Flattens the input. Does not affect the batch size.
 
+    # Arguments
+        data_format: A string,
+            one of `channels_last` (default) or `channels_first`.
+            The ordering of the dimensions in the inputs.
+            The purpose of this argument is to preserve weight
+            ordering when switching a model from one data format
+            to another.
+            `channels_last` corresponds to inputs with shape
+            `(batch, ..., channels)` while `channels_first` corresponds to
+            inputs with shape `(batch, channels, ...)`.
+            It defaults to the `image_data_format` value found in your
+            Keras config file at `~/.keras/keras.json`.
+            If you never set it, then it will be "channels_last".
+
     # Example
 
     ```python
         model = Sequential()
-        model.add(Conv2D(64, 3, 3,
-                         border_mode='same',
-                         input_shape=(3, 32, 32)))
+        model.add(Conv2D(64, (3, 3),
+                         input_shape=(3, 32, 32), padding='same',))
         # now: model.output_shape == (None, 64, 32, 32)
 
         model.add(Flatten())
@@ -467,9 +488,10 @@ class Flatten(Layer):
     ```
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, data_format=None, **kwargs):
         super(Flatten, self).__init__(**kwargs)
         self.input_spec = InputSpec(min_ndim=3)
+        self.data_format = K.normalize_data_format(data_format)
 
     def compute_output_shape(self, input_shape):
         if not all(input_shape[1:]):
@@ -482,7 +504,20 @@ class Flatten(Layer):
         return (input_shape[0], np.prod(input_shape[1:]))
 
     def call(self, inputs):
+        if self.data_format == 'channels_first':
+            # Ensure works for any dim
+            permutation = [0]
+            permutation.extend([i for i in
+                                range(2, K.ndim(inputs))])
+            permutation.append(1)
+            inputs = K.permute_dimensions(inputs, permutation)
+
         return K.batch_flatten(inputs)
+
+    def get_config(self):
+        config = {'data_format': self.data_format}
+        base_config = super(Flatten, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
 
 
 class RepeatVector(Layer):
@@ -557,10 +592,30 @@ class Lambda(Layer):
         model.add(Lambda(antirectifier,
                          output_shape=antirectifier_output_shape))
     ```
+    ```python
+        # add a layer that returns the hadamard product
+        # and sum of it from two input tensors
+
+        def hadamard_product_sum(tensors):
+            out1 = tensors[0] * tensors[1]
+            out2 = K.sum(out1, axis=-1)
+            return [out1, out2]
+
+        def hadamard_product_sum_output_shape(input_shapes):
+            shape1 = list(input_shapes[0])
+            shape2 = list(input_shapes[1])
+            assert shape1 == shape2  # else hadamard product isn't possible
+            return [tuple(shape1), tuple(shape2[:-1])]
+
+        x1 = Dense(32)(input_1)
+        x2 = Dense(32)(input_2)
+        layer = Lambda(hadamard_product_sum, hadamard_product_sum_output_shape)
+        x_hadamard, x_sum = layer([x1, x2])
+    ```
 
     # Arguments
         function: The function to be evaluated.
-            Takes input tensor as first argument.
+            Takes input tensor or list of tensors as first argument.
         output_shape: Expected output shape from function.
             Only relevant when using Theano.
             Can be a tuple or function.
@@ -582,7 +637,7 @@ class Lambda(Layer):
 
     # Output shape
         Specified by `output_shape` argument
-        (or auto-inferred when using TensorFlow).
+        (or auto-inferred when using TensorFlow or CNTK).
     """
 
     @interfaces.legacy_lambda_support
@@ -607,8 +662,8 @@ class Lambda(Layer):
 
     def compute_output_shape(self, input_shape):
         if self._output_shape is None:
-            # With TensorFlow, we can infer the output shape directly:
-            if K.backend() == 'tensorflow':
+            # With TensorFlow or CNTK, we can infer the output shape directly:
+            if K.backend() in ('tensorflow', 'cntk'):
                 if isinstance(input_shape, list):
                     xs = [K.placeholder(shape=shape) for shape in input_shape]
                     x = self.call(xs)
@@ -638,7 +693,8 @@ class Lambda(Layer):
         else:
             shape = self._output_shape(input_shape)
             if not isinstance(shape, (list, tuple)):
-                raise ValueError('`output_shape` function must return a tuple or a list of tuples.')
+                raise ValueError('`output_shape` function must return a tuple or '
+                                 'a list of tuples.')
             if isinstance(shape, list):
                 if isinstance(shape[0], int) or shape[0] is None:
                     shape = tuple(shape)
@@ -842,7 +898,7 @@ class Dense(Layer):
     def call(self, inputs):
         output = K.dot(inputs, self.kernel)
         if self.use_bias:
-            output = K.bias_add(output, self.bias)
+            output = K.bias_add(output, self.bias, data_format='channels_last')
         if self.activation is not None:
             output = self.activation(output)
         return output
@@ -863,7 +919,8 @@ class Dense(Layer):
             'bias_initializer': initializers.serialize(self.bias_initializer),
             'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
             'bias_regularizer': regularizers.serialize(self.bias_regularizer),
-            'activity_regularizer': regularizers.serialize(self.activity_regularizer),
+            'activity_regularizer':
+                regularizers.serialize(self.activity_regularizer),
             'kernel_constraint': constraints.serialize(self.kernel_constraint),
             'bias_constraint': constraints.serialize(self.bias_constraint)
         }
@@ -899,3 +956,6 @@ class ActivityRegularization(Layer):
                   'l2': self.l2}
         base_config = super(ActivityRegularization, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+        return input_shape

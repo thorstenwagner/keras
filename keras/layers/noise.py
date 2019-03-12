@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
+"""Layers that operate regularization via the addition of noise.
+"""
 from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-from ..engine import Layer
+from ..engine.base_layer import Layer
 from .. import backend as K
 import numpy as np
 from ..legacy import interfaces
-from ..engine import InputSpec
 
 
 class GaussianNoise(Layer):
@@ -48,6 +51,9 @@ class GaussianNoise(Layer):
         base_config = super(GaussianNoise, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
 
 class GaussianDropout(Layer):
     """Apply multiplicative 1-centered Gaussian noise.
@@ -68,7 +74,8 @@ class GaussianDropout(Layer):
         Same shape as input.
 
     # References
-        - [Dropout: A Simple Way to Prevent Neural Networks from Overfitting Srivastava, Hinton, et al. 2014](http://www.cs.toronto.edu/~rsalakhu/papers/srivastava14a.pdf)
+        - [Dropout: A Simple Way to Prevent Neural Networks from Overfitting](
+           http://www.cs.toronto.edu/~rsalakhu/papers/srivastava14a.pdf)
     """
 
     @interfaces.legacy_gaussiandropout_support
@@ -91,6 +98,9 @@ class GaussianDropout(Layer):
         config = {'rate': self.rate}
         base_config = super(GaussianDropout, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
 
 
 class AlphaDropout(Layer):
@@ -138,7 +148,8 @@ class AlphaDropout(Layer):
                 scale = 1.0507009873554804934193349852946
                 alpha_p = -alpha * scale
 
-                kept_idx = K.greater_equal(K.random_uniform(noise_shape, seed=seed), rate)
+                kept_idx = K.greater_equal(K.random_uniform(noise_shape,
+                                                            seed=seed), rate)
                 kept_idx = K.cast(kept_idx, K.floatx())
 
                 # Get affine transformation params
@@ -158,3 +169,6 @@ class AlphaDropout(Layer):
         config = {'rate': self.rate}
         base_config = super(AlphaDropout, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
